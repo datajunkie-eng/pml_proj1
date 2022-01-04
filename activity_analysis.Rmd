@@ -1,0 +1,172 @@
+---
+title: "Activity_Analysis"
+author: "Jeff Shelley"
+date: "12/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr); library(caret); library(rpart.plot); library(caretEnsemble)
+```
+
+## Overview
+Six participants are exercising with dumbbells in five different ways, and it's up to us to be able to recognize these five activities on a dataset where the activity isn't recorded.  We're going to split the training data into a train/test set, fitting two models and then stack them to see if we can get better results.  Then we'll load the validation set and see how we did.
+
+
+```{r, echo=FALSE}
+train.col.list = c("user_name",
+              "roll_belt", "pitch_belt", "yaw_belt",
+              "total_accel_belt",
+              "gyros_belt_x", "gyros_belt_y","gyros_belt_z",
+              "accel_belt_x","accel_belt_y","accel_belt_z",
+              "magnet_belt_x","magnet_belt_y","magnet_belt_z",
+              "roll_arm","pitch_arm","yaw_arm","total_accel_arm",
+              "gyros_arm_x","gyros_arm_y","gyros_arm_z",
+              "accel_arm_x","accel_arm_y","accel_arm_z",
+              "magnet_arm_x","magnet_arm_y","magnet_arm_z",
+              "roll_dumbbell","pitch_dumbbell","yaw_dumbbell","total_accel_dumbbell",
+              "gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z",
+              "accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z",
+              "magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z",
+              "roll_forearm","pitch_forearm","yaw_forearm","total_accel_forearm",
+              "gyros_forearm_x","gyros_forearm_y","gyros_forearm_z",
+              "accel_forearm_x","accel_forearm_y","accel_forearm_z",
+              "magnet_forearm_x","magnet_forearm_y","magnet_forearm_z",
+              "classe")
+validate.col.list = c("user_name",
+              "roll_belt", "pitch_belt", "yaw_belt",
+              "total_accel_belt",
+              "gyros_belt_x", "gyros_belt_y","gyros_belt_z",
+              "accel_belt_x","accel_belt_y","accel_belt_z",
+              "magnet_belt_x","magnet_belt_y","magnet_belt_z",
+              "roll_arm","pitch_arm","yaw_arm","total_accel_arm",
+              "gyros_arm_x","gyros_arm_y","gyros_arm_z",
+              "accel_arm_x","accel_arm_y","accel_arm_z",
+              "magnet_arm_x","magnet_arm_y","magnet_arm_z",
+              "roll_dumbbell","pitch_dumbbell","yaw_dumbbell","total_accel_dumbbell",
+              "gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z",
+              "accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z",
+              "magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z",
+              "roll_forearm","pitch_forearm","yaw_forearm","total_accel_forearm",
+              "gyros_forearm_x","gyros_forearm_y","gyros_forearm_z",
+              "accel_forearm_x","accel_forearm_y","accel_forearm_z",
+              "magnet_forearm_x","magnet_forearm_y","magnet_forearm_z",
+              "problem_id")
+```
+
+First, let's set up our datasets, selecting a subset of columns (see Appendix for the columns used in the train/test and validation sets):
+```{r}
+data <- read.csv("data/pml-training.csv")
+#classe is a factor variable
+data$classe <- factor(data$classe)
+#get rid of already-aggregated columns
+data <- select(data,all_of(train.col.list))
+
+#quick summary of the data we've selected from our Exploratory Data Analysis
+str(data)
+
+
+set.seed(654321)
+inTrain <- createDataPartition(y=data$classe, p=0.75, list=FALSE)
+train <- data[inTrain,]
+dim(train)
+
+test <- data[-inTrain,]
+dim(test)
+
+validation <- read.csv("data/pml-testing.csv")
+#get rid of already-aggregated columns
+validation <- select(validation, all_of(validate.col.list))
+dim(validation)
+```
+
+Let's train with a couple different algorithms and then ensemble them!  
+```{r}
+set.seed(123654)
+fit.1 <- train(
+  classe ~ ., data = train,
+  method = "rpart2", #note: rpart didn't find any case for D, but rpart2 does
+  tuneLength=15)
+
+set.seed(65432)
+fit.2 <- train(classe ~ ., method="knn", data=train)
+```
+Make our Predictions with our two models and check their accuracies
+```{r}
+#now stack both the above
+pred.1 <- predict(fit.1, newdata=test)
+postResample(pred.1,test$classe)
+pred.2 <- predict(fit.2, newdata=test)
+postResample(pred.2,test$classe)
+```
+
+Combine the predictions of the two fitted models into a new data frame and train a third, stacked model against the test set:
+```{r}
+combined.df <- data.frame(pred1=pred.1, pred2=pred.2, classe=test$classe)
+
+set.seed(65421)
+fit.combined <- train(classe ~ pred1 + pred2, 
+                      method="rf", data=combined.df)
+pred.combined <- predict(fit.combined, newdata=combined.df)
+
+postResample(pred.combined,test$classe)
+
+```
+So we've gone from fit.1 (75.04%) and fit.2 (91.70%) to 92.05% with them stacked!  We're feeling pretty good about this, let's take it to the validation set!
+
+```{r}
+pred.vd1 <- predict(fit.1, newdata=validation)
+pred.vd2 <- predict(fit.2, newdata=validation)
+combined.vddf <- data.frame(pred1=pred.vd1, pred2=pred.vd2, id=validation$problem_id)
+pred.vdcombined <- predict(fit.combined, newdata=combined.vddf)
+```
+
+And a table of our final results:
+```{r}
+table(combined.vddf$id, pred.vdcombined)
+```
+
+
+
+## Appendix: Columns Used in data sets
+```
+train.col.list = c("user_name",
+              "roll_belt", "pitch_belt", "yaw_belt",
+              "total_accel_belt",
+              "gyros_belt_x", "gyros_belt_y","gyros_belt_z",
+              "accel_belt_x","accel_belt_y","accel_belt_z",
+              "magnet_belt_x","magnet_belt_y","magnet_belt_z",
+              "roll_arm","pitch_arm","yaw_arm","total_accel_arm",
+              "gyros_arm_x","gyros_arm_y","gyros_arm_z",
+              "accel_arm_x","accel_arm_y","accel_arm_z",
+              "magnet_arm_x","magnet_arm_y","magnet_arm_z",
+              "roll_dumbbell","pitch_dumbbell","yaw_dumbbell","total_accel_dumbbell",
+              "gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z",
+              "accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z",
+              "magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z",
+              "roll_forearm","pitch_forearm","yaw_forearm","total_accel_forearm",
+              "gyros_forearm_x","gyros_forearm_y","gyros_forearm_z",
+              "accel_forearm_x","accel_forearm_y","accel_forearm_z",
+              "magnet_forearm_x","magnet_forearm_y","magnet_forearm_z",
+              "classe")
+validate.col.list = c("user_name",
+              "roll_belt", "pitch_belt", "yaw_belt",
+              "total_accel_belt",
+              "gyros_belt_x", "gyros_belt_y","gyros_belt_z",
+              "accel_belt_x","accel_belt_y","accel_belt_z",
+              "magnet_belt_x","magnet_belt_y","magnet_belt_z",
+              "roll_arm","pitch_arm","yaw_arm","total_accel_arm",
+              "gyros_arm_x","gyros_arm_y","gyros_arm_z",
+              "accel_arm_x","accel_arm_y","accel_arm_z",
+              "magnet_arm_x","magnet_arm_y","magnet_arm_z",
+              "roll_dumbbell","pitch_dumbbell","yaw_dumbbell","total_accel_dumbbell",
+              "gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z",
+              "accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z",
+              "magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z",
+              "roll_forearm","pitch_forearm","yaw_forearm","total_accel_forearm",
+              "gyros_forearm_x","gyros_forearm_y","gyros_forearm_z",
+              "accel_forearm_x","accel_forearm_y","accel_forearm_z",
+              "magnet_forearm_x","magnet_forearm_y","magnet_forearm_z",
+              "problem_id")
+```
